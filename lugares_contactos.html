@@ -1,0 +1,421 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Registro de Lugares y Contactos</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script>
+        async function sha256(str) {
+            const msgBuffer = new TextEncoder().encode(str);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+    </script>
+    <style>
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            0% { opacity: 0; transform: translateY(10px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+        .btn-hover {
+            transition: all 0.3s ease;
+        }
+        .btn-hover:hover {
+            transform: translateY(-2px);
+        }
+        input:focus, textarea:focus {
+            outline: none;
+            ring: 2px solid #3b82f6;
+        }
+        .chat-message {
+            max-width: 85%;
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+        }
+        .manuel-message {
+            background-color: #dbeafe;
+            margin-left: auto;
+            text-align: right;
+        }
+        .carla-message {
+            background-color: #fef3c7;
+            margin-right: auto;
+        }
+        @media (max-width: 640px) {
+            .container {
+                padding: 1rem;
+            }
+            .chat-message {
+                max-width: 90%;
+            }
+            .chat-unified {
+                height: 12rem;
+            }
+            input, textarea, button {
+                font-size: 1rem;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+    <div class="container max-w-full sm:max-w-5xl mx-auto p-4 sm:p-6 bg-white rounded-2xl shadow-xl">
+        <div id="loginSection" class="fade-in">
+            <h2 class="text-2xl sm:text-3xl font-bold text-center text-gray-800 mb-6">Iniciar Sesión</h2>
+            <div class="max-w-md mx-auto">
+                <label for="password" class="block text-sm font-medium text-gray-700">Contraseña</label>
+                <input type="password" id="password" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Ingresa la contraseña">
+                <p id="errorMessage" class="text-red-500 text-sm mt-2 hidden">Contraseña incorrecta</p>
+                <button onclick="checkPassword()" class="mt-4 w-full bg-blue-600 text-white p-3 rounded-lg font-semibold btn-hover hover:bg-blue-700">Ingresar</button>
+            </div>
+        </div>
+
+        <div id="mainSection" class="hidden fade-in">
+            <h2 class="text-2xl sm:text-3xl font-bold text-center text-gray-800 mb-6">Registro de Lugares y Contactos</h2>
+            <form id="placeForm" class="space-y-6 bg-gray-50 p-4 sm:p-6 rounded-lg shadow-md">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label for="latitude" class="block text-sm font-medium text-gray-700">Latitud</label>
+                        <input type="number" step="any" id="latitude" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Ej: 19.4326" required>
+                    </div>
+                    <div>
+                        <label for="longitude" class="block text-sm font-medium text-gray-700">Longitud</label>
+                        <input type="number" step="any" id="longitude" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Ej: -99.1332" required>
+                    </div>
+                </div>
+                <div>
+                    <label for="placeName" class="block text-sm font-medium text-gray-700">Nombre del Lugar</label>
+                    <input type="text" id="placeName" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Ej: Ciudad de México" required>
+                </div>
+                <div>
+                    <label for="placeLink" class="block text-sm font-medium text-gray-700">Enlace del Lugar</label>
+                    <input type="url" id="placeLink" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Ej: https://maps.google.com/...">
+                </div>
+                <div>
+                    <label for="image" class="block text-sm font-medium text-gray-700">Imagen de Referencia</label>
+                    <input type="file" id="image" accept="image/*" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg">
+                    <img id="imagePreview" class="hidden mt-4 max-w-full rounded-lg shadow-md" alt="Vista previa de la imagen">
+                </div>
+                <div>
+                    <h3 class="text-lg sm:text-xl font-semibold text-gray-800 mb-4">Contactos</h3>
+                    <div id="contacts" class="space-y-4">
+                        <div class="contact grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label for="contactName1" class="block text-sm font-medium text-gray-700">Nombre</label>
+                                <input type="text" id="contactName1" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Nombre del contacto" required>
+                            </div>
+                            <div>
+                                <label for="contactPhone1" class="block text-sm font-medium text-gray-700">Teléfono</label>
+                                <input type="tel" id="contactPhone1" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Ej: +1234567890" required>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" onclick="addContact()" class="mt-4 w-full bg-gray-200 text-gray-800 p-3 rounded-lg font-semibold btn-hover hover:bg-gray-300">Agregar otro contacto</button>
+                </div>
+                <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+                    <button type="submit" class="w-full bg-green-600 text-white p-3 rounded-lg font-semibold btn-hover hover:bg-green-700">Guardar Lugar</button>
+                    <button type="button" onclick="resetForm()" class="w-full bg-blue-200 text-blue-800 p-3 rounded-lg font-semibold btn-hover hover:bg-blue-300">Agregar Nuevo Lugar</button>
+                </div>
+            </form>
+
+            <h2 class="text-2xl sm:text-3xl font-bold text-center text-gray-800 mt-10 mb-6">Lugares Guardados</h2>
+            <div id="savedData" class="space-y-6"></div>
+
+            <h2 class="text-2xl sm:text-3xl font-bold text-center text-gray-800 mt-10 mb-6">Chat</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <h3 class="text-lg sm:text-xl font-semibold text-gray-800 mb-4">Mensajes de Manuel</h3>
+                    <div class="bg-gray-50 p-4 rounded-lg shadow-md">
+                        <textarea id="manuelMessage" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Escribe un mensaje como Manuel"></textarea>
+                        <button onclick="sendMessage('Manuel')" class="mt-2 w-full bg-blue-600 text-white p-3 rounded-lg font-semibold btn-hover hover:bg-blue-700">Enviar</button>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="text-lg sm:text-xl font-semibold text-gray-800 mb-4">Mensajes de Carla</h3>
+                    <div class="bg-gray-50 p-4 rounded-lg shadow-md">
+                        <textarea id="carlaMessage" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Escribe un mensaje como Carla"></textarea>
+                        <button onclick="sendMessage('Carla')" class="mt-2 w-full bg-yellow-600 text-white p-3 rounded-lg font-semibold btn-hover hover:bg-yellow-700">Enviar</button>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="text-lg sm:text-xl font-semibold text-gray-800 mb-4">Conversación Unificada</h3>
+                    <div id="chatUnified" class="chat-unified bg-gray-50 p-4 rounded-lg shadow-md h-64 overflow-y-auto"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let contactCount = 1;
+        const backendUrl = 'http://localhost:3000/api';
+
+        async function checkPassword() {
+            const password = document.getElementById('password').value;
+            const errorMessage = document.getElementById('errorMessage');
+            const loginSection = document.getElementById('loginSection');
+            const mainSection = document.getElementById('mainSection');
+
+            try {
+                const response = await axios.post(`${backendUrl}/login`, { password });
+                if (response.data.success) {
+                    loginSection.classList.add('hidden');
+                    mainSection.classList.remove('hidden');
+                    errorMessage.classList.add('hidden');
+                    loadSavedData();
+                    loadChat();
+                } else {
+                    errorMessage.classList.remove('hidden');
+                }
+            } catch (error) {
+                errorMessage.classList.remove('hidden');
+            }
+        }
+
+        document.getElementById('image').addEventListener('change', function(event) {
+            const imagePreview = document.getElementById('imagePreview');
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    imagePreview.src = e.target.result;
+                    imagePreview.classList.remove('hidden');
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        function addContact() {
+            contactCount++;
+            const contactsDiv = document.getElementById('contacts');
+            const newContact = document.createElement('div');
+            newContact.className = 'contact grid grid-cols-1 sm:grid-cols-2 gap-4';
+            newContact.innerHTML = `
+                <div>
+                    <label for="contactName${contactCount}" class="block text-sm font-medium text-gray-700">Nombre</label>
+                    <input type="text" id="contactName${contactCount}" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Nombre del contacto" required>
+                </div>
+                <div>
+                    <label for="contactPhone${contactCount}" class="block text-sm font-medium text-gray-700">Teléfono</label>
+                    <input type="tel" id="contactPhone${contactCount}" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Ej: +1234567890" required>
+                </div>
+            `;
+            contactsDiv.appendChild(newContact);
+        }
+
+        function validateForm(latitude, longitude, placeLink) {
+            if (isNaN(latitude) || latitude < -90 || latitude > 90) {
+                alert('La latitud debe estar entre -90 y 90.');
+                return false;
+            }
+            if (isNaN(longitude) || longitude < -180 || longitude > 180) {
+                alert('La longitud debe estar entre -180 y 180.');
+                return false;
+            }
+            if (placeLink && !/^(https?:\/\/)/i.test(placeLink)) {
+                alert('El enlace debe ser una URL válida (ej: https://...).');
+                return false;
+            }
+            return true;
+        }
+
+        function resetForm() {
+            document.getElementById('placeForm').reset();
+            document.getElementById('imagePreview').classList.add('hidden');
+            document.getElementById('contacts').innerHTML = `
+                <div class="contact grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <label for="contactName1" class="block text-sm font-medium text-gray-700">Nombre</label>
+                    <input type="text" id="contactName1" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Nombre del contacto" required>
+                    <label for="contactPhone1" class="block text-sm font-medium text-gray-700">Teléfono</label>
+                    <input type="tel" id="contactPhone1" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Ej: +1234567890" required>
+                </div>
+            `;
+            contactCount = 1;
+        }
+
+        async function loadSavedData() {
+            const savedDataDiv = document.getElementById('savedData');
+            try {
+                const response = await axios.get(`${backendUrl}/places`);
+                const savedEntries = response.data;
+                savedDataDiv.innerHTML = '';
+
+                savedEntries.forEach((entry, index) => {
+                    const entryDiv = document.createElement('div');
+                    entryDiv.className = 'entry bg-gray-50 p-4 sm:p-6 rounded-lg shadow-md';
+                    entryDiv.innerHTML = `
+                        <h3 class="text-lg sm:text-xl font-semibold text-gray-800">${entry.placeName}</h3>
+                        <p class="text-gray-600 text-sm sm:text-base"><strong>Coordenadas:</strong> Lat: ${entry.latitude}, Lon: ${entry.longitude}</p>
+                        ${entry.placeLink ? `<p class="text-gray-600 text-sm sm:text-base"><strong>Enlace:</strong> <a href="${entry.placeLink}" target="_blank" class="text-blue-600 hover:underline">${entry.placeLink}</a></p>` : ''}
+                        <p class="text-gray-600 text-sm sm:text-base"><strong>Contactos:</strong></p>
+                        <ul class="list-disc list-inside text-gray-600 text-sm sm:text-base">
+                            ${entry.contacts.map(contact => `<li>${contact.name}: ${contact.phone}</li>`).join('')}
+                        </ul>
+                        ${entry.image ? `<img src="${entry.image}" class="mt-4 max-w-full rounded-lg shadow-md" alt="Imagen del lugar">` : '<p class="text-gray-600 text-sm sm:text-base">Sin imagen</p>'}
+                        <button onclick="deleteEntry('${entry._id}')" class="mt-4 bg-red-600 text-white p-2 rounded-lg font-semibold btn-hover hover:bg-red-700">Eliminar</button>
+                    `;
+                    savedDataDiv.appendChild(entryDiv);
+                });
+            } catch (error) {
+                alert('Error al cargar los datos.');
+            }
+        }
+
+        async function deleteEntry(id) {
+            if (confirm('¿Estás seguro de eliminar esta entrada?')) {
+                try {
+                    await axios.delete(`${backendUrl}/places/${id}`);
+                    loadSavedData();
+                } catch (error) {
+                    alert('Error al eliminar la entrada.');
+                }
+            }
+        }
+
+        async function sendMessage(sender) {
+            const messageInput = document.getElementById(`${sender.toLowerCase()}Message`);
+            const message = messageInput.value.trim();
+            if (!message) return;
+
+            const timestamp = new Date().toLocaleString('es-ES', { hour12: false });
+            try {
+                await axios.post(`${backendUrl}/messages`, { sender, message, timestamp });
+                messageInput.value = '';
+                loadChat();
+            } catch (error) {
+                alert('Error al enviar el mensaje.');
+            }
+        }
+
+        async function loadChat() {
+            const chatUnified = document.getElementById('chatUnified');
+            try {
+                const response = await axios.get(`${backendUrl}/messages`);
+                const chat = response.data;
+                chatUnified.innerHTML = '';
+
+                chat.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)).forEach(msg => {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = `chat-message ${msg.sender === 'Manuel' ? 'manuel-message' : 'carla-message'}`;
+                    messageDiv.innerHTML = `
+                        <p class="text-sm font-semibold">${msg.sender}</p>
+                        <p class="text-sm sm:text-base">${msg.message}</p>
+                        <p class="text-xs text-gray-500">${msg.timestamp}</p>
+                    `;
+                    chatUnified.appendChild(messageDiv);
+                });
+                chatUnified.scrollTop = chatUnified.scrollHeight;
+            } catch (error) {
+                alert('Error al cargar el chat.');
+            }
+        }
+
+        document.getElementById('placeForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const latitude = parseFloat(document.getElementById('latitude').value);
+            const longitude = parseFloat(document.getElementById('longitude').value);
+            const placeName = document.getElementById('placeName').value.trim();
+            const placeLink = document.getElementById('placeLink').value.trim();
+            const image = document.getElementById('image').files[0];
+            const contacts = [];
+
+            if (!placeName) {
+                alert('El nombre del lugar es obligatorio.');
+                return;
+            }
+
+            for (let i = 1; i <= contactCount; i++) {
+                const name = document.getElementById(`contactName${i}`).value.trim();
+                const phone = document.getElementById(`contactPhone${i}`).value.trim();
+                if (name && phone) {
+                    contacts.push({ name, phone });
+                } else if (name || phone) {
+                    alert('Por favor, completa ambos campos (nombre y teléfono) para cada contacto.');
+                    return;
+                }
+            }
+
+            if (contacts.length === 0) {
+                alert('Debes agregar al menos un contacto válido.');
+                return;
+            }
+
+            if (!validateForm(latitude, longitude, placeLink)) return;
+
+            const entry = {
+                latitude,
+                longitude,
+                placeName,
+                placeLink,
+                contacts,
+                image: null
+            };
+
+            if (image) {
+                const reader = new FileReader();
+                reader.onload = async function(e) {
+                    entry.image = e.target.result;
+                    await saveEntry(entry);
+                };
+                reader.readAsDataURL(image);
+            } else {
+                await saveEntry(entry);
+            }
+        });
+
+        async function saveEntry(entry) {
+            try {
+                await axios.post(`${backendUrl}/places`, entry);
+                alert('Lugar guardado correctamente. Puedes agregar otro lugar.');
+                resetForm();
+                loadSavedData();
+            } catch (error) {
+                alert('Error al guardar el lugar.');
+            }
+        }
+    </script>
+</body>
+</html>
